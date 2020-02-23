@@ -1,3 +1,6 @@
+import java.util.TreeMap
+import java.util.TreeSet
+
 enum class Gender {
     F,
     M
@@ -189,110 +192,122 @@ private val winners: List<Winner> = listOf(
     Winner(year = 2018, name = "Kawauchi,Yuki", country = "JPN", time = 8158, gender = Gender.M)
 )
 
+private const val NOT_FOUND = "Not found"
+
+private fun Int.isWithin1980s(): Boolean = this in 1980 until 1990
+
 fun main(args: Array<String>) {
-    // Sort the data by year.
-    val winnersByYear = winners.sortedBy { it.year }
-        // From most recent to least recent.
-        .reversed()
+    // There are problems asking for data sorting by year, grouping by country, 
+    // grouping by gender, ..., etc.
+    // And the raw data isn't sorted; If it's sorted, I could probably cut the
+    // searching range to improve the performance.
+    // That observation almost means I have to visit every elements given the data.
+    // e.g. To know the slowest men's time.
+    // So I walk through the data and encode the element in different sorted 
+    // buckets would be most efficient solution.
+    //
+    // (Or we could do that at the data creating, that adds some metadata to boost
+    // the searching performance)
+    // 
+    // Time complexity: O(nlog(n))
+    // Reasoning:
+    // (X + log(n)) * n + n + clog(c)
+    //  ^   ^             ^     ^
+    //  |   +- BST insert |     +- from sorting the country bucket.
+    //  |                 |
+    //  +- from bucketing |
+    //                    +- from searching in the gender bucket.
+    //
+    // Where X and c are constants, n is the variable of the winner entry size.
+    // It turns out the nlog(n) is the dominant term.
 
-    // 1. Most recent year that Canada (CAN) won the Boston Marathon (took 5 mins)
-    kotlin.run {
-        // println("winnersByYear: $winnersByYear")
+    // The thinking process roughly took 5 mins.
+    // The implementation takes longer and it's roughly 40 mins.
 
-        // Find the answer by finding the first Canada record.
-        // Time complexity: O(n)
-        val mostRecentCanadaWinner = winnersByYear.firstOrNull { it.country == "CAN" }?.year ?: "Not found"
-        
-        // Overall time complexity is O(n)
-        
-        println("1. Most recent year that Canada (CAN) won the Boston Marathon => $mostRecentCanadaWinner")
-    }
-
-    // 2. Fastest women's time in the 1980s (took 8 mins)
-    kotlin.run {
-        // Since the data is sorted by years, a range search is helpful
-        // Time complexity: O(n)
-        val winnersIn1980s = winners.filter { it.year >= 1980 && it.year < 1990 && it.gender == Gender.F }
-        var fastestTime = Int.MAX_VALUE
-        var fastestWinner: Winner? = null
-        // Time complexity: O(m) where m <= n
-        for (winner in winnersIn1980s) {
-            if (winner.time < fastestTime) {
-                fastestTime = winner.time
-                fastestWinner = winner
-            }
-        }
-
-        // Overall time complexity is O(n)
-        
-        println("2. Fastest women's time in the 1980s => $fastestWinner")
-    }
-
-    // 3. After the United States,the country that has won the 2nd-most number of times (took 17 mins)
-    kotlin.run {
-        // Group the data by country.
-        // Time complexity: O(n)
-        val countryRecords = mutableMapOf<String, Int>()
-        winners.forEach { 
-            val country = it.country
-            val times = countryRecords[country] ?: 0
-            countryRecords[country] = times + 1
-        }
-        
-        // Sort the country records.
-        // Time complexity: O(m x log(m)) where m is the number of country.
-        val sortedCountryRecords = countryRecords.toList()
-            // Value in ascending order.
-            .sortedBy { (_, value) -> value }
-            // Value in descending order, which is from the most to the least.
-            .reversed()
-        
-        // println("countryRecords: $countryRecords")
-        // println("sortedCountryRecords: $sortedCountryRecords")
-
-        // Find the rank of the USA.
-        // Time complexity: O(m) where m is the number of country.
-        val usRank = sortedCountryRecords.indexOfFirst { (country, _) -> country == "USA" }
-        val ans = if (usRank in 0 until sortedCountryRecords.size - 1) {
-            sortedCountryRecords[usRank + 1].first
-        } else {
-            "Not found"
-        }
-
-        println("3. After the United States,the country that has won the 2nd-most number of times => $ans") 
-    }
+    // Map of country name to most recent year.
+    val mostRecentYearByCountry = mutableMapOf<String, Int>()
+    // The fastest women's time in the 1980s.
+    var fastestWomenTime = Int.MAX_VALUE
+    // Map of country name to the winning times.
+    val timesByCountry = mutableMapOf<String, Int>()
+    // Slowest men's time.
+    var slowestMenTime = Int.MIN_VALUE
+    // Yearly winners by gender in BST.
+    // val menWinners = TreeMap<Int, Winner>() // Comment out to save space...
+    val womenWinners = TreeMap<Int, Winner>()
     
-    // 4. First year that a woman's time beat the slowest men's winning time (took 8 mins)
-    kotlin.run {
-        // Find the slowest men's winning time.
-        // Time complexity: O(n)
-        var slowestMenTime = 0
-        winners.forEach {
-            val isMale = it.gender == Gender.M
-            val time = it.time
-            if (isMale && time > slowestMenTime) {
-                slowestMenTime = time
+    // Walk through the elements and encode them in different sorted buckets.
+    winners.forEach { winner ->
+        val (year, _, country, time, gender) = winner
+
+        // Collect the most recent year that Canada won the Boston Marathon.
+        mostRecentYearByCountry[country]?.let { mostRecentYear ->
+            if (year > mostRecentYear) {
+                // Found new recent year!
+                mostRecentYearByCountry[country] = year
             }
+        } ?: kotlin.run {
+            // New record!
+            mostRecentYearByCountry[country] = year
         }
-        // println("slowestMenTime: $slowestMenTime")
 
-        // Find the first women that beats the time.
-        // Time complexity: O(n)
-        var womenYear: Int? = null
-        for (i in winnersByYear.lastIndex downTo 0) {
-            val winner = winnersByYear[i]
-            if (winner.gender != Gender.F) continue
-
-            val time = winner.time
-            if (time < slowestMenTime) {
-                womenYear = winner.year
-                break
-            }
+        // Collect the fastest women's time in the 1980s.
+        if (year.isWithin1980s() && gender == Gender.F) {
+            fastestWomenTime = Math.min(fastestWomenTime, time)
         }
-        val womenYearPrinted = womenYear?.toString() ?: "Not found"
 
-        // Overall time complexity is O(n)
+        // Collect the times by country
+        val times = timesByCountry[country] ?: 0
+        timesByCountry[country] = times + 1
 
-        println("4. First year that a woman's time beat the slowest men's winning time => $womenYearPrinted")
+        // Bucket the winners by gender and store the records in a BST.
+        if (gender == Gender.M) {
+            slowestMenTime = Math.max(slowestMenTime, time)
+
+            // Comment out to save computing...
+            // menWinners[year] = winner
+        } else {
+            womenWinners[year] = winner
+        }
     }
+
+    // 1. Most recent year that Canada (CAN) won the Boston Marathon
+    println("1. Most recent year that Canada (CAN) won the Boston Marathon => ${mostRecentYearByCountry["CAN"]}")
+    
+    // 2. Fastest women's time in the 1980s.
+    val fastestWomenTimePrettyString = if (fastestWomenTime == Int.MAX_VALUE) {
+        NOT_FOUND
+    } else {
+        fastestWomenTime.toString()
+    }
+    println("2. Fastest women's time in the 1980s => $fastestWomenTimePrettyString")
+
+    // 3. After the United States,the country that has won the 2nd-most number of times.
+    // Sort the contry bucket, the time complexity has a upper bound as the fixed 
+    // number of the country in the world. i.e. The time complexity is independent 
+    // from the amount of data entry and the time complexity is relatively constant.
+    val sortedTimesByCountry = timesByCountry.toList()
+        // Sorting is roughly clog(c) and the result is in ascending order.
+        .sortedBy { (_, value) -> value }
+    val usRank = sortedTimesByCountry.indexOfLast { (country, _) -> country == "USA" }
+    val rankAfterUs = if (usRank in 1 until sortedTimesByCountry.size) {
+        sortedTimesByCountry[usRank - 1].first
+    } else {
+        NOT_FOUND
+    }
+    println("3. After the United States,the country that has won the 2nd-most number of times => $rankAfterUs")
+
+    // 4. First year that a woman's time beat the slowest men's winning time.
+    // The TreeMap provides a special iterator that guarantees the natural order of
+    // entry by key, and the key is year. :D
+    var yearOfWomenBeatSlowestMenOpt: Int? = null
+    for (entry in womenWinners.entries) {
+        val (year, winner) = entry
+        if (winner.time < slowestMenTime) {
+            yearOfWomenBeatSlowestMenOpt = year
+            break
+        }
+    }
+    val yearOfWomenBeatSlowestMen = yearOfWomenBeatSlowestMenOpt ?: NOT_FOUND
+    println("4. First year that a woman's time beat the slowest men's winning time => $yearOfWomenBeatSlowestMen")
 }
